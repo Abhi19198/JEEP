@@ -1,0 +1,13 @@
+package com.jeep.team.repository;
+
+import com.jeep.team.domain.Team;
+import com.jeep.team.domain.TeamMember;
+import org.springframework.data.jpa.repository.JpaRepository;
+
+import java.util.List;
+import java.util.UUID;
+
+public interface TeamMemberRepository extends JpaRepository<TeamMember, UUID> {
+
+    List<TeamMember> findByTeam(Team team);
+}

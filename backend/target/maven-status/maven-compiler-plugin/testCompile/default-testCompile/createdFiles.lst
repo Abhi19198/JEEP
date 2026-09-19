@@ -1,0 +1,9 @@
+com\jeep\identity\service\AuthServiceTest.class
+com\jeep\project\service\ProjectServiceTest.class
+com\jeep\notification\service\NotificationServiceTest.class
+com\jeep\repository\service\RepositoryServiceTest.class
+com\jeep\ai\service\AiAssistantServiceTest.class
+com\jeep\JeepApplicationTests.class
+com\jeep\organization\service\OrganizationServiceTest.class
+com\jeep\task\service\TaskServiceTest.class
+com\jeep\analytics\service\AnalyticsServiceTest.class
