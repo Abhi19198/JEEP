@@ -6,6 +6,7 @@ import com.jeep.config.PasswordConfig;
 import com.jeep.identity.domain.AccountStatus;
 import com.jeep.identity.domain.User;
 import com.jeep.identity.domain.UserRole;
+import com.jeep.identity.exception.IdentityException;
 import com.jeep.identity.repository.UserRepository;
 import com.jeep.organization.domain.Organization;
 import com.jeep.organization.domain.OrganizationMember;
@@ -23,7 +24,10 @@ import org.springframework.context.annotation.Import;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.ActiveProfiles;
 
+import java.util.UUID;
+
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @DataJpaTest
 @Import({AiAssistantService.class, PasswordConfig.class})
@@ -96,5 +100,85 @@ class AiAssistantServiceTest {
         assertThat(response.projectId()).isEqualTo(project.getId());
         assertThat(response.suggestion()).isNotBlank();
         assertThat(response.confidence()).isBetween(0.0, 1.0);
+    }
+
+    @Test
+    void generateSuggestion_shouldFailWhenUserIsNotOrganizationMember() {
+        User member = userRepository.save(User.builder()
+            .firstName("Alan")
+            .lastName("Turing")
+            .email("alan@jeep.example")
+            .passwordHash(passwordEncoder.encode("StrongPass123!"))
+            .status(AccountStatus.ACTIVE)
+            .role(UserRole.PROJECT_MANAGER)
+            .build());
+
+        Organization organization = organizationRepository.save(Organization.builder()
+            .name("AI Team")
+            .description("Research org")
+            .active(true)
+            .build());
+
+        organizationMemberRepository.save(OrganizationMember.builder()
+            .organization(organization)
+            .user(member)
+            .role(OrganizationRole.ADMIN)
+            .build());
+
+        Project project = projectRepository.save(Project.builder()
+            .organization(organization)
+            .name("ML Pipeline")
+            .description("Build data pipeline")
+            .status(ProjectStatus.ACTIVE)
+            .build());
+
+        userRepository.save(User.builder()
+            .firstName("Grace")
+            .lastName("Hopper")
+            .email("grace@jeep.example")
+            .passwordHash(passwordEncoder.encode("StrongPass123!"))
+            .status(AccountStatus.ACTIVE)
+            .role(UserRole.DEVELOPER)
+            .build());
+
+        assertThatThrownBy(() -> aiAssistantService.generateSuggestion("grace@jeep.example", new AiSuggestionRequest(
+            project.getId(),
+            "We are late on the release and need a safer plan.",
+            "risk_review"
+        )))
+            .isInstanceOf(IdentityException.class)
+            .hasMessageContaining("not a member");
+    }
+
+    @Test
+    void generateSuggestion_shouldFailForUnknownProject() {
+        User user = userRepository.save(User.builder()
+            .firstName("Alan")
+            .lastName("Turing")
+            .email("alan@jeep.example")
+            .passwordHash(passwordEncoder.encode("StrongPass123!"))
+            .status(AccountStatus.ACTIVE)
+            .role(UserRole.PROJECT_MANAGER)
+            .build());
+
+        Organization organization = organizationRepository.save(Organization.builder()
+            .name("AI Team")
+            .description("Research org")
+            .active(true)
+            .build());
+
+        organizationMemberRepository.save(OrganizationMember.builder()
+            .organization(organization)
+            .user(user)
+            .role(OrganizationRole.ADMIN)
+            .build());
+
+        assertThatThrownBy(() -> aiAssistantService.generateSuggestion("alan@jeep.example", new AiSuggestionRequest(
+            UUID.randomUUID(),
+            "We are late on the release and need a safer plan.",
+            "risk_review"
+        )))
+            .isInstanceOf(IdentityException.class)
+            .hasMessageContaining("Project not found");
     }
 }
