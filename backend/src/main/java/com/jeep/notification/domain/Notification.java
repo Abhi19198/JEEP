@@ -69,4 +69,8 @@ public class Notification {
         createdAt = Instant.now();
         read = false;
     }
+
+    public void markAsRead() {
+        this.read = true;
+    }
 }

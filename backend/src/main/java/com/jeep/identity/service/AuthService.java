@@ -5,11 +5,14 @@ import com.jeep.identity.domain.User;
 import com.jeep.identity.domain.UserRole;
 import com.jeep.identity.dto.AuthResponse;
 import com.jeep.identity.dto.LoginRequest;
+import com.jeep.identity.dto.RefreshTokenRequest;
 import com.jeep.identity.dto.RegisterRequest;
 import com.jeep.identity.exception.DuplicateUserException;
 import com.jeep.identity.exception.IdentityException;
 import com.jeep.identity.exception.InvalidCredentialsException;
 import com.jeep.identity.repository.UserRepository;
+import io.jsonwebtoken.Claims;
+import io.jsonwebtoken.JwtException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -47,7 +50,7 @@ public class AuthService {
         String accessToken = tokenService.generateAccessToken(savedUser);
         String refreshToken = tokenService.generateRefreshToken(savedUser);
 
-        return new AuthResponse(accessToken, refreshToken, "Bearer", savedUser.getEmail(), savedUser.getRole().name());
+        return new AuthResponse(accessToken, refreshToken, "Bearer", savedUser.getEmail(), savedUser.getRole().name(), savedUser.getId());
     }
 
     @Transactional
@@ -68,6 +71,31 @@ public class AuthService {
         String accessToken = tokenService.generateAccessToken(user);
         String refreshToken = tokenService.generateRefreshToken(user);
 
-        return new AuthResponse(accessToken, refreshToken, "Bearer", user.getEmail(), user.getRole().name());
+        return new AuthResponse(accessToken, refreshToken, "Bearer", user.getEmail(), user.getRole().name(), user.getId());
+    }
+
+    @Transactional(readOnly = true)
+    public AuthResponse refresh(RefreshTokenRequest request) {
+        Claims claims;
+        try {
+            claims = tokenService.parseToken(request.refreshToken());
+        } catch (JwtException | IllegalArgumentException ex) {
+            throw new InvalidCredentialsException();
+        }
+
+        if (!"refresh".equals(claims.get("tokenType", String.class))) {
+            throw new InvalidCredentialsException();
+        }
+
+        User user = userRepository.findByEmail(claims.getSubject())
+            .orElseThrow(InvalidCredentialsException::new);
+
+        if (user.getStatus() != AccountStatus.ACTIVE) {
+            throw new IdentityException("Account is not active");
+        }
+
+        String accessToken = tokenService.generateAccessToken(user);
+
+        return new AuthResponse(accessToken, request.refreshToken(), "Bearer", user.getEmail(), user.getRole().name(), user.getId());
     }
 }

@@ -11,6 +11,7 @@ import com.jeep.team.domain.Team;
 import com.jeep.team.domain.TeamMember;
 import com.jeep.team.domain.TeamRole;
 import com.jeep.team.dto.CreateTeamRequest;
+import com.jeep.team.dto.TeamMemberResponse;
 import com.jeep.team.dto.TeamResponse;
 import com.jeep.team.repository.TeamMemberRepository;
 import com.jeep.team.repository.TeamRepository;
@@ -67,6 +68,22 @@ public class TeamService {
 
         return teamRepository.findByOrganization(organization).stream()
             .map(this::toResponse)
+            .toList();
+    }
+
+    @Transactional(readOnly = true)
+    public List<TeamMemberResponse> getTeamMembers(UUID teamId) {
+        Team team = teamRepository.findById(teamId)
+            .orElseThrow(() -> new IdentityException("Team not found"));
+
+        return teamMemberRepository.findByTeam(team).stream()
+            .map(member -> new TeamMemberResponse(
+                member.getUser().getId(),
+                member.getUser().getFirstName(),
+                member.getUser().getLastName(),
+                member.getUser().getEmail(),
+                member.getRole()
+            ))
             .toList();
     }
 

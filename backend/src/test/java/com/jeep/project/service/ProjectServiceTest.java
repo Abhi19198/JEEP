@@ -4,6 +4,7 @@ import com.jeep.config.PasswordConfig;
 import com.jeep.identity.domain.AccountStatus;
 import com.jeep.identity.domain.User;
 import com.jeep.identity.domain.UserRole;
+import com.jeep.identity.exception.IdentityException;
 import com.jeep.identity.repository.UserRepository;
 import com.jeep.organization.domain.Organization;
 import com.jeep.organization.domain.OrganizationMember;
@@ -21,6 +22,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.ActiveProfiles;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @DataJpaTest
 @Import({ProjectService.class, PasswordConfig.class})
@@ -82,5 +84,89 @@ class ProjectServiceTest {
         assertThat(response).isNotNull();
         assertThat(response.name()).isEqualTo("Platform Launch");
         assertThat(response.organizationId()).isEqualTo(organization.getId());
+    }
+
+    @Test
+    void createProject_shouldFailWhenUserIsNotOrganizationMember() {
+        User member = userRepository.save(User.builder()
+            .firstName("Ada")
+            .lastName("Lovelace")
+            .email("ada@jeep.example")
+            .passwordHash(passwordEncoder.encode("StrongPass123!"))
+            .status(AccountStatus.ACTIVE)
+            .role(UserRole.ADMIN)
+            .build());
+
+        Organization organization = organizationRepository.save(Organization.builder()
+            .name("JEEP Labs")
+            .description("Engineering org")
+            .active(true)
+            .build());
+
+        organizationMemberRepository.save(OrganizationMember.builder()
+            .organization(organization)
+            .user(member)
+            .role(OrganizationRole.OWNER)
+            .build());
+
+        userRepository.save(User.builder()
+            .firstName("Grace")
+            .lastName("Hopper")
+            .email("grace@jeep.example")
+            .passwordHash(passwordEncoder.encode("StrongPass123!"))
+            .status(AccountStatus.ACTIVE)
+            .role(UserRole.DEVELOPER)
+            .build());
+
+        assertThatThrownBy(() -> projectService.createProject("grace@jeep.example", new CreateProjectRequest(
+            organization.getId().toString(),
+            "Sneaky Project",
+            "No membership here"
+        )))
+            .isInstanceOf(IdentityException.class)
+            .hasMessageContaining("not a member");
+    }
+
+    @Test
+    void getProject_shouldFailForCrossOrganizationAccess() {
+        User member = userRepository.save(User.builder()
+            .firstName("Ada")
+            .lastName("Lovelace")
+            .email("ada@jeep.example")
+            .passwordHash(passwordEncoder.encode("StrongPass123!"))
+            .status(AccountStatus.ACTIVE)
+            .role(UserRole.ADMIN)
+            .build());
+
+        Organization organization = organizationRepository.save(Organization.builder()
+            .name("JEEP Labs")
+            .description("Engineering org")
+            .active(true)
+            .build());
+
+        organizationMemberRepository.save(OrganizationMember.builder()
+            .organization(organization)
+            .user(member)
+            .role(OrganizationRole.OWNER)
+            .build());
+
+        ProjectResponse created = projectService.createProject("ada@jeep.example", new CreateProjectRequest(
+            organization.getId().toString(),
+            "Platform Launch",
+            "Q4 launch project"
+        ));
+
+        userRepository.save(User.builder()
+            .firstName("Grace")
+            .lastName("Hopper")
+            .email("grace@jeep.example")
+            .passwordHash(passwordEncoder.encode("StrongPass123!"))
+            .status(AccountStatus.ACTIVE)
+            .role(UserRole.DEVELOPER)
+            .build());
+
+        assertThatThrownBy(() -> projectService.getProject("grace@jeep.example", created.id()))
+            .isInstanceOf(IdentityException.class)
+            .hasMessageContaining("not a member");
     }
 }

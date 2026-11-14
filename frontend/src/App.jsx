@@ -1,74 +1,125 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import './App.css'
+import { SESSION_KEY, createApiClient, requestJson, userIdFromToken } from './api.js'
+import { createLiveHub, websocketUrl } from './stomp.js'
+import { Brand } from './components/Brand.jsx'
+import { Overview } from './components/Overview.jsx'
+import { Sidebar } from './components/Sidebar.jsx'
+import { OrganizationsPage } from './pages/OrganizationsPage.jsx'
+import { ProjectsPage } from './pages/ProjectsPage.jsx'
+import { TasksPage } from './pages/TasksPage.jsx'
+import { TeamsPage } from './pages/TeamsPage.jsx'
+import { RepositoriesPage } from './pages/RepositoriesPage.jsx'
+import { NotificationsPage } from './pages/NotificationsPage.jsx'
+import { AiAssistantPage } from './pages/AiAssistantPage.jsx'
+import { ReportsPage } from './pages/ReportsPage.jsx'
 
-const API_BASE = (import.meta.env.VITE_API_BASE_URL || '/api/v1').replace(/\/$/, '')
-const SESSION_KEY = 'jeep-session'
 const emptyAuth = { firstName: '', lastName: '', email: '', password: '', confirmPassword: '' }
-const emptyOrganization = { name: '', description: '' }
-const emptyProject = { name: '', description: '' }
-const emptyTask = { title: '', description: '', priority: 'MEDIUM', status: 'TODO' }
-
-async function requestJson(path, options = {}) {
-  const response = await fetch(`${API_BASE}${path}`, {
-    headers: { 'Content-Type': 'application/json', ...(options.token ? { Authorization: `Bearer ${options.token}` } : {}), ...(options.headers || {}) },
-    ...options,
-  })
-  const contentType = response.headers.get('content-type') || ''
-  const payload = contentType.includes('application/json') ? await response.json() : null
-  if (!response.ok) throw new Error(payload?.message || payload?.error || 'Request failed')
-  return payload
+const TITLES = {
+  '/': 'Overview',
+  '/organizations': 'Organizations',
+  '/projects': 'Projects',
+  '/tasks': 'Tasks',
+  '/teams': 'Teams',
+  '/repositories': 'Repositories',
+  '/notifications': 'Notifications',
+  '/ai-assistant': 'AI Assistant',
+  '/reports': 'Reports',
 }
 
 function App() {
-  const [session, setSession] = useState(() => JSON.parse(localStorage.getItem(SESSION_KEY) || 'null'))
+  // Sessions saved before the backend started returning userId get it
+  // from the JWT payload instead, so live notifications work for them too.
+  const [session, setSession] = useState(() => {
+    const stored = JSON.parse(localStorage.getItem(SESSION_KEY) || 'null')
+    if (stored?.token && !stored.userId) stored.userId = userIdFromToken(stored.token)
+    return stored
+  })
   const [isLogin, setIsLogin] = useState(true)
   const [authForm, setAuthForm] = useState(emptyAuth)
-  const [activeView, setActiveView] = useState('Overview')
+  const [liveConnected, setLiveConnected] = useState(false)
   const [organizations, setOrganizations] = useState([])
   const [projects, setProjects] = useState([])
-  const [tasks, setTasks] = useState([])
   const [analytics, setAnalytics] = useState(null)
   const [selectedOrganization, setSelectedOrganization] = useState('')
   const [selectedProject, setSelectedProject] = useState('')
-  const [organizationForm, setOrganizationForm] = useState(emptyOrganization)
-  const [projectForm, setProjectForm] = useState(emptyProject)
-  const [taskForm, setTaskForm] = useState(emptyTask)
-  const [aiForm, setAiForm] = useState({ prompt: '', type: 'risk_review' })
-  const [aiResponse, setAiResponse] = useState(null)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+  const location = useLocation()
 
-  const loadOrganizations = async (token = session?.token) => {
-    if (!token) return
-    const result = await requestJson('/organizations', { token })
+  // The API client closes over the current session via a ref so pages keep a
+  // stable `api` function while refreshes still see the latest tokens.
+  const sessionRef = useRef(session)
+  sessionRef.current = session
+
+  // Live updates: one STOMP connection for the session, created once.
+  // Pages subscribe through this hub; when the socket is down they keep
+  // working from their REST loads. A refreshed token reconnects with it.
+  const [liveHub] = useState(() => createLiveHub({
+    onConnect: () => setLiveConnected(true),
+    onDisconnect: () => setLiveConnected(false),
+  }))
+
+  useEffect(() => {
+    if (!session?.token) {
+      liveHub.disconnect()
+      setLiveConnected(false)
+      return
+    }
+    liveHub.connect(websocketUrl(), session.token)
+    return () => liveHub.disconnect()
+  }, [session?.token, liveHub])
+
+  const logout = useCallback(() => {
+    localStorage.removeItem(SESSION_KEY)
+    setSession(null)
+    setOrganizations([])
+    setProjects([])
+    setAnalytics(null)
+    setSelectedOrganization('')
+    setSelectedProject('')
+  }, [])
+
+  const api = useCallback(createApiClient({
+    getSession: () => sessionRef.current,
+    onSessionRefreshed: (nextSession) => {
+      localStorage.setItem(SESSION_KEY, JSON.stringify(nextSession))
+      setSession(nextSession)
+    },
+    onSessionExpired: logout,
+  }), [logout])
+
+  const loadOrganizations = useCallback(async () => {
+    if (!sessionRef.current?.token) return
+    const result = await api('/organizations')
     setOrganizations(result || [])
-    if (!selectedOrganization && result?.[0]) setSelectedOrganization(result[0].id)
-  }
+    // Auto-select the first organization when nothing is selected, or when
+    // the selected one is gone (e.g. just deleted).
+    const current = selectedOrganizationRef.current
+    if ((!current || !result?.some((org) => org.id === current)) && result?.[0]) setSelectedOrganization(result[0].id)
+  }, [api])
+  const selectedOrganizationRef = useRef(selectedOrganization)
+  selectedOrganizationRef.current = selectedOrganization
 
-  const loadProjects = async (organizationId = selectedOrganization) => {
-    if (!organizationId || !session?.token) return
-    const result = await requestJson(`/projects/organization/${organizationId}`, { token: session.token })
-    setProjects(result || [])
-    setSelectedProject(result?.[0]?.id || '')
-  }
-
-  const loadTasks = async (projectId = selectedProject) => {
-    if (!projectId || !session?.token) return
-    setTasks(await requestJson(`/tasks/project/${projectId}`, { token: session.token }))
-  }
+  // Project dropdown list (all pages share it). Paginated lists live in the
+  // Projects/Tasks pages; the dropdown fetches a large first page.
+  const loadProjects = useCallback(async (organizationId = selectedOrganizationRef.current) => {
+    if (!organizationId || !sessionRef.current?.token) return
+    const result = await api(`/projects/organization/${organizationId}?page=0&size=100`)
+    const items = Array.isArray(result) ? result : (result?.content || [])
+    setProjects(items)
+    setSelectedProject((current) => (items.some((project) => project.id === current) ? current : (items[0]?.id || '')))
+  }, [api])
 
   useEffect(() => {
     if (session) loadOrganizations().catch((reason) => setError(reason.message))
-  }, [session])
+  }, [session, loadOrganizations])
 
   useEffect(() => {
     if (selectedOrganization) loadProjects().catch((reason) => setError(reason.message))
-  }, [selectedOrganization])
-
-  useEffect(() => {
-    if (selectedProject) loadTasks().catch((reason) => setError(reason.message))
-    else setTasks([])
-  }, [selectedProject])
+    else { setProjects([]); setSelectedProject('') }
+  }, [selectedOrganization, loadProjects])
 
   const updateForm = (setter) => (event) => setter((current) => ({ ...current, [event.target.name]: event.target.value }))
 
@@ -80,7 +131,7 @@ function App() {
       const endpoint = isLogin ? '/auth/login' : '/auth/register'
       const payload = isLogin ? { email: authForm.email, password: authForm.password } : authForm
       const response = await requestJson(endpoint, { method: 'POST', body: JSON.stringify(payload) })
-      const nextSession = { email: response.email, role: response.role, token: response.accessToken }
+      const nextSession = { email: response.email, role: response.role, userId: response.userId || userIdFromToken(response.accessToken), token: response.accessToken, refreshToken: response.refreshToken }
       localStorage.setItem(SESSION_KEY, JSON.stringify(nextSession))
       setSession(nextSession)
       setAuthForm(emptyAuth)
@@ -91,112 +142,66 @@ function App() {
     }
   }
 
-  const submitResource = async (path, body, afterSave) => {
-    setLoading(true)
-    setError('')
-    try {
-      await requestJson(path, { method: 'POST', token: session.token, body: JSON.stringify(body) })
-      await afterSave()
-    } catch (reason) {
-      setError(reason.message)
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const createOrganization = (event) => {
-    event.preventDefault()
-    submitResource('/organizations', organizationForm, async () => {
-      setOrganizationForm(emptyOrganization)
-      await loadOrganizations()
-    })
-  }
-
-  const createProject = (event) => {
-    event.preventDefault()
-    submitResource('/projects', { ...projectForm, organizationId: selectedOrganization }, async () => {
-      setProjectForm(emptyProject)
-      await loadProjects()
-    })
-  }
-
-  const createTask = (event) => {
-    event.preventDefault()
-    submitResource('/tasks', { ...taskForm, projectId: selectedProject }, async () => {
-      setTaskForm(emptyTask)
-      await loadTasks()
-    })
-  }
-
   const loadReport = async () => {
     if (!selectedOrganization) return
     setLoading(true)
     try {
-      setAnalytics(await requestJson(`/analytics/organizations/${selectedOrganization}`, { token: session.token }))
+      setAnalytics(await api(`/analytics/organizations/${selectedOrganization}`))
     } catch (reason) {
       setError(reason.message)
     } finally {
       setLoading(false)
     }
-  }
-
-  const getSuggestion = async (event) => {
-    event.preventDefault()
-    setLoading(true)
-    try {
-      setAiResponse(await requestJson('/ai/suggest', { method: 'POST', token: session.token, body: JSON.stringify({ ...aiForm, projectId: selectedProject }) }))
-    } catch (reason) {
-      setError(reason.message)
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const logout = () => {
-    localStorage.removeItem(SESSION_KEY)
-    setSession(null)
-    setOrganizations([])
-    setProjects([])
-    setTasks([])
   }
 
   if (!session) {
-    return <div className="auth-shell"><div className="auth-card">
-      <Brand />
-      <div className="auth-toggle"><button type="button" className={isLogin ? 'active' : ''} onClick={() => setIsLogin(true)}>Login</button><button type="button" className={!isLogin ? 'active' : ''} onClick={() => setIsLogin(false)}>Register</button></div>
-      <form className="auth-form" onSubmit={submitAuth}>
-        {!isLogin && <><label>First name<input name="firstName" value={authForm.firstName} onChange={updateForm(setAuthForm)} required /></label><label>Last name<input name="lastName" value={authForm.lastName} onChange={updateForm(setAuthForm)} required /></label></>}
-        <label>Email<input type="email" name="email" value={authForm.email} onChange={updateForm(setAuthForm)} required /></label>
-        <label>Password<input type="password" name="password" value={authForm.password} onChange={updateForm(setAuthForm)} required /></label>
-        {!isLogin && <label>Confirm password<input type="password" name="confirmPassword" value={authForm.confirmPassword} onChange={updateForm(setAuthForm)} required /></label>}
-        {error && <div className="error-box">{error}</div>}
-        <button className="primary-btn auth-submit" type="submit" disabled={loading}>{loading ? 'Please wait...' : isLogin ? 'Login' : 'Create account'}</button>
-      </form>
-    </div></div>
+    return (
+      <div className="auth-shell"><div className="auth-card">
+        <Brand />
+        <div className="auth-toggle"><button type="button" className={isLogin ? 'active' : ''} onClick={() => setIsLogin(true)}>Login</button><button type="button" className={!isLogin ? 'active' : ''} onClick={() => setIsLogin(false)}>Register</button></div>
+        <form className="auth-form" onSubmit={submitAuth}>
+          {!isLogin && <><label>First name<input name="firstName" value={authForm.firstName} onChange={updateForm(setAuthForm)} required /></label><label>Last name<input name="lastName" value={authForm.lastName} onChange={updateForm(setAuthForm)} required /></label></>}
+          <label>Email<input type="email" name="email" value={authForm.email} onChange={updateForm(setAuthForm)} required /></label>
+          <label>Password<input type="password" name="password" value={authForm.password} onChange={updateForm(setAuthForm)} required /></label>
+          {!isLogin && <label>Confirm password<input type="password" name="confirmPassword" value={authForm.confirmPassword} onChange={updateForm(setAuthForm)} required /></label>}
+          {error && <div className="error-box">{error}</div>}
+          <button className="primary-btn auth-submit" type="submit" disabled={loading}>{loading ? 'Please wait...' : isLogin ? 'Login' : 'Create account'}</button>
+        </form>
+      </div></div>
+    )
   }
 
-  const openTasks = tasks.filter((task) => !['DONE', 'CANCELLED'].includes(task.status)).length
-  const views = ['Overview', 'Organizations', 'Projects', 'Tasks', 'AI Assistant', 'Reports']
+  const ws = {
+    api, session, organizations, selectedOrganization, setSelectedOrganization,
+    projects, selectedProject, setSelectedProject, analytics, setAnalytics,
+    loading, setLoading, error, setError,
+    live: liveHub, liveConnected,
+    refreshOrganizations: loadOrganizations, refreshProjects: loadProjects, loadReport,
+  }
 
-  return <div className="dashboard-shell">
-    <aside className="sidebar"><Brand /><nav className="nav">{views.map((view) => <button key={view} className={`nav-item ${activeView === view ? 'active' : ''}`} onClick={() => setActiveView(view)}>{view}</button>)}</nav><div className="sidebar-card"><p className="eyebrow">Signed in</p><h3>{session.role}</h3><span>{session.email}</span><button type="button" className="logout-btn" onClick={logout}>Logout</button></div></aside>
-    <main className="main-panel"><header className="topbar"><div><p className="eyebrow">JEEP workspace</p><h1>{activeView}</h1></div>{activeView === 'Reports' && <button className="primary-btn" onClick={loadReport} disabled={loading || !selectedOrganization}>Refresh report</button>}</header>
-      {error && <div className="error-box">{error}</div>}
-      {activeView === 'Overview' && <Overview analytics={analytics} organizations={organizations} projects={projects} openTasks={openTasks} />}
-      {activeView === 'Reports' && <><Overview analytics={analytics} organizations={organizations} projects={projects} openTasks={openTasks} /><section className="panel"><PanelTitle title="Analytics" /><p>Select an organization and refresh the report to load live counts.</p><select value={selectedOrganization} onChange={(event) => setSelectedOrganization(event.target.value)}><option value="">Choose organization</option>{organizations.map((org) => <option key={org.id} value={org.id}>{org.name}</option>)}</select></section></>}
-      {activeView === 'Organizations' && <section className="panel"><PanelTitle title="Organizations" /><form className="inline-form" onSubmit={createOrganization}><input name="name" placeholder="Organization name" value={organizationForm.name} onChange={updateForm(setOrganizationForm)} required /><input name="description" placeholder="Description" value={organizationForm.description} onChange={updateForm(setOrganizationForm)} /><button className="primary-btn" disabled={loading}>Create</button></form><div className="org-list">{organizations.map((org) => <button className={`org-item ${selectedOrganization === org.id ? 'selected' : ''}`} key={org.id} onClick={() => setSelectedOrganization(org.id)}><strong>{org.name}</strong><span>{org.description || 'No description provided'}</span></button>)}</div></section>}
-      {activeView === 'Projects' && <section className="panel"><PanelTitle title="Projects" /><select value={selectedOrganization} onChange={(event) => setSelectedOrganization(event.target.value)}><option value="">Choose organization</option>{organizations.map((org) => <option key={org.id} value={org.id}>{org.name}</option>)}</select><form className="inline-form" onSubmit={createProject}><input name="name" placeholder="Project name" value={projectForm.name} onChange={updateForm(setProjectForm)} required /><input name="description" placeholder="Description" value={projectForm.description} onChange={updateForm(setProjectForm)} /><button className="primary-btn" disabled={loading || !selectedOrganization}>Create</button></form><div className="org-list">{projects.map((project) => <button className={`org-item ${selectedProject === project.id ? 'selected' : ''}`} key={project.id} onClick={() => setSelectedProject(project.id)}><strong>{project.name}</strong><span>{project.status} · {project.description || 'No description provided'}</span></button>)}</div></section>}
-      {activeView === 'Tasks' && <section className="panel"><PanelTitle title="Tasks" /><select value={selectedProject} onChange={(event) => setSelectedProject(event.target.value)}><option value="">Choose project</option>{projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}</select><form className="inline-form" onSubmit={createTask}><input name="title" placeholder="Task title" value={taskForm.title} onChange={updateForm(setTaskForm)} required /><select name="priority" value={taskForm.priority} onChange={updateForm(setTaskForm)}><option>LOW</option><option>MEDIUM</option><option>HIGH</option><option>CRITICAL</option></select><select name="status" value={taskForm.status} onChange={updateForm(setTaskForm)}><option>TODO</option><option>IN_PROGRESS</option><option>REVIEW</option><option>DONE</option></select><button className="primary-btn" disabled={loading || !selectedProject}>Create</button></form><div className="org-list">{tasks.map((task) => <div className="org-item" key={task.id}><strong>{task.title}</strong><span>{task.priority} · {task.status}{task.description ? ` · ${task.description}` : ''}</span></div>)}</div></section>}
-      {activeView === 'AI Assistant' && <section className="panel"><PanelTitle title="AI Assistant" /><select value={selectedProject} onChange={(event) => setSelectedProject(event.target.value)}><option value="">Choose project</option>{projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}</select><form className="auth-form" onSubmit={getSuggestion}><label>Suggestion type<input name="type" value={aiForm.type} onChange={updateForm(setAiForm)} required /></label><label>Prompt<textarea name="prompt" value={aiForm.prompt} onChange={updateForm(setAiForm)} required placeholder="Describe the project risk or decision" /></label><button className="primary-btn" disabled={loading || !selectedProject}>Generate suggestion</button></form>{aiResponse && <div className="ai-card"><p>{aiResponse.suggestion}</p><div className="ai-stats"><div><strong>{Math.round(aiResponse.confidence * 100)}%</strong><span>confidence</span></div><div><strong>{aiResponse.type}</strong><span>type</span></div></div></div>}</section>}
-    </main>
-  </div>
-}
-
-function Brand() { return <div className="brand-block"><div className="brand-mark">J</div><div><p className="eyebrow">Enterprise</p><h2>JEEP</h2></div></div> }
-function PanelTitle({ title }) { return <div className="panel-header"><h3>{title}</h3><span className="chip neutral">Live data</span></div> }
-function Overview({ analytics, organizations, projects, openTasks }) {
-  const stats = analytics ? [['Members', analytics.totalMembers], ['Projects', analytics.totalProjects], ['Open tasks', analytics.openTasks], ['Completed', analytics.completedTasks]] : [['Organizations', organizations.length], ['Projects', projects.length], ['Open tasks', openTasks], ['Status', 'Live']]
-  return <><section className="metrics-grid">{stats.map(([label, value]) => <article className="metric-card" key={label}><span className="metric-label">{label}</span><strong>{value}</strong><small className="positive">From API</small></article>)}</section><section className="panel"><PanelTitle title="Workspace summary" /><p>Select an organization to load projects, create tasks, request AI guidance, and review analytics.</p></section></>
+  return (
+    <div className="dashboard-shell">
+      <Sidebar session={session} onLogout={logout} />
+      <main className="main-panel">
+        <header className="topbar">
+          <div><p className="eyebrow">JEEP workspace</p><h1>{TITLES[location.pathname] || 'Overview'}</h1></div>
+        </header>
+        {error && <div className="error-box">{error}</div>}
+        <Routes>
+          <Route path="/" element={<Overview analytics={analytics} organizations={organizations} projects={projects} openTasks={analytics?.openTasks ?? '–'} />} />
+          <Route path="/organizations" element={<OrganizationsPage ws={ws} />} />
+          <Route path="/projects" element={<ProjectsPage ws={ws} />} />
+          <Route path="/tasks" element={<TasksPage ws={ws} />} />
+          <Route path="/teams" element={<TeamsPage ws={ws} />} />
+          <Route path="/repositories" element={<RepositoriesPage ws={ws} />} />
+          <Route path="/notifications" element={<NotificationsPage ws={ws} />} />
+          <Route path="/ai-assistant" element={<AiAssistantPage ws={ws} />} />
+          <Route path="/reports" element={<ReportsPage ws={ws} />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </main>
+    </div>
+  )
 }
 
 export default App

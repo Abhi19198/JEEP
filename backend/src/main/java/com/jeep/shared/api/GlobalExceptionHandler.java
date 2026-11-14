@@ -3,6 +3,8 @@ package com.jeep.shared.api;
 import com.jeep.identity.exception.DuplicateUserException;
 import com.jeep.identity.exception.IdentityException;
 import com.jeep.identity.exception.InvalidCredentialsException;
+import com.jeep.repository.github.GitHubApiException;
+import com.jeep.repository.github.GitHubRateLimitException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.ConstraintViolationException;
 import org.springframework.http.HttpStatus;
@@ -49,6 +51,16 @@ public class GlobalExceptionHandler {
             status = HttpStatus.UNAUTHORIZED;
         }
         return buildResponse(status, "IDENTITY_ERROR", ex.getMessage(), request, List.of());
+    }
+
+    @ExceptionHandler(GitHubRateLimitException.class)
+    public ResponseEntity<ApiErrorResponse> handleGitHubRateLimit(GitHubRateLimitException ex, HttpServletRequest request) {
+        return buildResponse(HttpStatus.TOO_MANY_REQUESTS, "GITHUB_RATE_LIMITED", ex.getMessage(), request, List.of());
+    }
+
+    @ExceptionHandler(GitHubApiException.class)
+    public ResponseEntity<ApiErrorResponse> handleGitHubApi(GitHubApiException ex, HttpServletRequest request) {
+        return buildResponse(HttpStatus.BAD_GATEWAY, "GITHUB_API_ERROR", ex.getMessage(), request, List.of());
     }
 
     @ExceptionHandler(Exception.class)

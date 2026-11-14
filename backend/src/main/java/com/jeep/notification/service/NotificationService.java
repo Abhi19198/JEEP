@@ -9,7 +9,9 @@ import com.jeep.notification.domain.NotificationType;
 import com.jeep.notification.dto.CreateNotificationRequest;
 import com.jeep.notification.dto.NotificationResponse;
 import com.jeep.notification.repository.NotificationRepository;
+import com.jeep.websocket.NotificationCreatedEvent;
 import lombok.RequiredArgsConstructor;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -22,6 +24,7 @@ public class NotificationService {
 
     private final NotificationRepository notificationRepository;
     private final UserRepository userRepository;
+    private final ApplicationEventPublisher eventPublisher;
 
     @Transactional
     public NotificationResponse createNotification(String userEmail, CreateNotificationRequest request) {
@@ -54,7 +57,9 @@ public class NotificationService {
             .build();
 
         Notification saved = notificationRepository.save(notification);
-        return toResponse(saved);
+        NotificationResponse response = toResponse(saved);
+        eventPublisher.publishEvent(new NotificationCreatedEvent(response));
+        return response;
     }
 
     @Transactional(readOnly = true)
@@ -65,6 +70,40 @@ public class NotificationService {
         return notificationRepository.findByUserOrderByCreatedAtDesc(user).stream()
             .map(this::toResponse)
             .toList();
+    }
+
+    /**
+     * Creates a notification for a specific user (used for automatic
+     * notifications, e.g. when a task is assigned or its status changes).
+     * Unlike {@link #createNotification}, the recipient is given directly
+     * instead of being the authenticated caller.
+     */
+    @Transactional
+    public NotificationResponse createForUser(User recipient, NotificationType type, ChannelType channel, String title, String message) {
+        Notification notification = Notification.builder()
+            .user(recipient)
+            .type(type)
+            .channel(channel)
+            .title(title)
+            .message(message)
+            .build();
+
+        NotificationResponse response = toResponse(notificationRepository.save(notification));
+        eventPublisher.publishEvent(new NotificationCreatedEvent(response));
+        return response;
+    }
+
+    @Transactional
+    public NotificationResponse markAsRead(String userEmail, UUID notificationId) {
+        User user = userRepository.findByEmail(userEmail)
+            .orElseThrow(() -> new IdentityException("User not found"));
+        Notification notification = notificationRepository.findById(notificationId)
+            .orElseThrow(() -> new IdentityException("Notification not found"));
+        if (!notification.getUser().getId().equals(user.getId())) {
+            throw new IdentityException("Notification does not belong to this user");
+        }
+        notification.markAsRead();
+        return toResponse(notification);
     }
 
     private NotificationResponse toResponse(Notification notification) {

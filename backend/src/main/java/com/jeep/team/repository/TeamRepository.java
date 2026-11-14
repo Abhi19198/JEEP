@@ -10,4 +10,6 @@ import java.util.UUID;
 public interface TeamRepository extends JpaRepository<Team, UUID> {
 
     List<Team> findByOrganization(Organization organization);
+
+    long countByOrganization(Organization organization);
 }

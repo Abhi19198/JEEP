@@ -6,6 +6,10 @@ import com.jeep.project.dto.UpdateProjectRequest;
 import com.jeep.project.service.ProjectService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
+import org.springframework.data.web.PageableDefault;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
@@ -16,9 +20,9 @@ import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-import java.util.List;
 import java.util.UUID;
 
 @RestController
@@ -38,8 +42,13 @@ public class ProjectController {
     }
 
     @GetMapping("/organization/{organizationId}")
-    public ResponseEntity<List<ProjectResponse>> getProjectsForOrganization(Authentication authentication, @PathVariable UUID organizationId) {
-        return ResponseEntity.ok(projectService.getProjectsForOrganization(authentication.getName(), organizationId));
+    public ResponseEntity<Page<ProjectResponse>> getProjectsForOrganization(
+        Authentication authentication,
+        @PathVariable UUID organizationId,
+        @RequestParam(required = false) String search,
+        @PageableDefault(size = 10, sort = "createdAt", direction = Sort.Direction.DESC) Pageable pageable
+    ) {
+        return ResponseEntity.ok(projectService.getProjectsForOrganization(authentication.getName(), organizationId, search, pageable));
     }
 
     @GetMapping("/{id}")

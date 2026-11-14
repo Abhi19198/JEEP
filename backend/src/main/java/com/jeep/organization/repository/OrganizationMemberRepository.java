@@ -5,10 +5,15 @@ import com.jeep.organization.domain.Organization;
 import com.jeep.organization.domain.OrganizationMember;
 import org.springframework.data.jpa.repository.JpaRepository;
 
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
 public interface OrganizationMemberRepository extends JpaRepository<OrganizationMember, UUID> {
 
     Optional<OrganizationMember> findByOrganizationAndUser(Organization organization, User user);
+
+    List<OrganizationMember> findByUser(User user);
+
+    long countByOrganization(Organization organization);
 }

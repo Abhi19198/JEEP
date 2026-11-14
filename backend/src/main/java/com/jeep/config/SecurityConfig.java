@@ -34,8 +34,15 @@ public class SecurityConfig {
                     "/actuator/health/**",
                     "/actuator/info",
                     "/error",
+                    // The WebSocket handshake itself is unauthenticated by
+                    // necessity (browsers cannot send an Authorization
+                    // header with it); the JWT is checked on the STOMP
+                    // CONNECT frame by StompAuthInterceptor instead.
+                    "/ws",
+                    "/ws/**",
                     "/api/v1/auth/login",
-                    "/api/v1/auth/register"
+                    "/api/v1/auth/register",
+                    "/api/v1/auth/refresh"
                 ).permitAll()
                 .anyRequest().authenticated()
             )

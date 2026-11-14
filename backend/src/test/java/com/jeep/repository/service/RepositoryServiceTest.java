@@ -4,6 +4,7 @@ import com.jeep.config.PasswordConfig;
 import com.jeep.identity.domain.AccountStatus;
 import com.jeep.identity.domain.User;
 import com.jeep.identity.domain.UserRole;
+import com.jeep.identity.exception.IdentityException;
 import com.jeep.identity.repository.UserRepository;
 import com.jeep.organization.domain.Organization;
 import com.jeep.organization.domain.OrganizationMember;
@@ -25,6 +26,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.ActiveProfiles;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @DataJpaTest
 @Import({RepositoryService.class, PasswordConfig.class})
@@ -99,5 +101,94 @@ class RepositoryServiceTest {
         assertThat(response.provider()).isEqualTo(RepositoryProvider.GITLAB);
         assertThat(response.projectId()).isEqualTo(project.getId());
         assertThat(response.defaultBranch()).isEqualTo("main");
+    }
+
+    @Test
+    void createRepository_shouldFailForUnsupportedProvider() {
+        User user = userRepository.save(User.builder()
+            .firstName("Linus")
+            .lastName("Torvalds")
+            .email("linus@jeep.example")
+            .passwordHash(passwordEncoder.encode("StrongPass123!"))
+            .status(AccountStatus.ACTIVE)
+            .role(UserRole.DEVELOPER)
+            .build());
+
+        Organization organization = organizationRepository.save(Organization.builder()
+            .name("Kernel Team")
+            .description("Open source org")
+            .active(true)
+            .build());
+
+        organizationMemberRepository.save(OrganizationMember.builder()
+            .organization(organization)
+            .user(user)
+            .role(OrganizationRole.MEMBER)
+            .build());
+
+        Project project = projectRepository.save(Project.builder()
+            .organization(organization)
+            .name("Platform Upgrade")
+            .description("Repo integration")
+            .status(ProjectStatus.ACTIVE)
+            .build());
+
+        assertThatThrownBy(() -> repositoryService.createRepository("linus@jeep.example", new CreateRepositoryRequest(
+            project.getId(),
+            "svn",
+            "https://svn.example.com/platform",
+            "main"
+        )))
+            .isInstanceOf(IdentityException.class)
+            .hasMessageContaining("Unsupported repository provider");
+    }
+
+    @Test
+    void createRepository_shouldFailWhenUserIsNotOrganizationMember() {
+        User member = userRepository.save(User.builder()
+            .firstName("Linus")
+            .lastName("Torvalds")
+            .email("linus@jeep.example")
+            .passwordHash(passwordEncoder.encode("StrongPass123!"))
+            .status(AccountStatus.ACTIVE)
+            .role(UserRole.DEVELOPER)
+            .build());
+
+        Organization organization = organizationRepository.save(Organization.builder()
+            .name("Kernel Team")
+            .description("Open source org")
+            .active(true)
+            .build());
+
+        organizationMemberRepository.save(OrganizationMember.builder()
+            .organization(organization)
+            .user(member)
+            .role(OrganizationRole.MEMBER)
+            .build());
+
+        Project project = projectRepository.save(Project.builder()
+            .organization(organization)
+            .name("Platform Upgrade")
+            .description("Repo integration")
+            .status(ProjectStatus.ACTIVE)
+            .build());
+
+        userRepository.save(User.builder()
+            .firstName("Alan")
+            .lastName("Turing")
+            .email("alan@jeep.example")
+            .passwordHash(passwordEncoder.encode("StrongPass123!"))
+            .status(AccountStatus.ACTIVE)
+            .role(UserRole.DEVELOPER)
+            .build());
+
+        assertThatThrownBy(() -> repositoryService.createRepository("alan@jeep.example", new CreateRepositoryRequest(
+            project.getId(),
+            "github",
+            "https://github.com/example/platform",
+            "main"
+        )))
+            .isInstanceOf(IdentityException.class)
+            .hasMessageContaining("not a member");
     }
 }
