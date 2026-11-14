@@ -16,6 +16,7 @@ import com.jeep.project.domain.ProjectStatus;
 import com.jeep.project.repository.ProjectRepository;
 import com.jeep.notification.repository.NotificationRepository;
 import com.jeep.notification.service.NotificationService;
+import com.jeep.shared.cache.CacheService;
 import com.jeep.task.domain.TaskPriority;
 import com.jeep.task.domain.TaskStatus;
 import com.jeep.task.dto.CreateTaskRequest;
@@ -33,7 +34,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @DataJpaTest
-@Import({TaskService.class, NotificationService.class, PasswordConfig.class})
+@Import({TaskService.class, NotificationService.class, CacheService.class, PasswordConfig.class})
 @ActiveProfiles("test")
 class TaskServiceTest {
 

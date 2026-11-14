@@ -21,6 +21,20 @@ spring:
   flyway:
     enabled: true
     baseline-on-migrate: true
+  # Redis backs the cache-aside layer (org analytics + project task lists).
+  # The cache fails open to the database, so a short timeout keeps a dead
+  # Redis from slowing requests down. Overridden by env in compose/prod.
+  # No Redis repositories are used (only StringRedisTemplate), so the
+  # repository auto-configuration stays off: otherwise Spring Data would
+  # scan every JPA repository on startup and log a warning per interface.
+  data:
+    redis:
+      repositories:
+        enabled: false
+      host: ${SPRING_DATA_REDIS_HOST:localhost}
+      port: ${SPRING_DATA_REDIS_PORT:6379}
+      connect-timeout: 2s
+      timeout: 2s
 
 management:
   endpoints:
@@ -32,6 +46,12 @@ management:
       show-details: when_authorized
       probes:
         enabled: true
+      # Redis is an optional cache, not a readiness dependency: the app
+      # serves from the database when Redis is down, so it stays out of
+      # the readiness group (it still shows in the main /actuator/health).
+      group:
+        readiness:
+          include: db, diskSpace, ping
 
 logging:
   level:

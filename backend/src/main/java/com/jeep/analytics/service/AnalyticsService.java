@@ -8,6 +8,7 @@ import com.jeep.organization.domain.Organization;
 import com.jeep.organization.repository.OrganizationMemberRepository;
 import com.jeep.organization.repository.OrganizationRepository;
 import com.jeep.project.repository.ProjectRepository;
+import com.jeep.shared.cache.CacheService;
 import com.jeep.task.domain.TaskStatus;
 import com.jeep.task.repository.TaskRepository;
 import com.jeep.team.repository.TeamRepository;
@@ -28,6 +29,7 @@ public class AnalyticsService {
     private final ProjectRepository projectRepository;
     private final TaskRepository taskRepository;
     private final UserRepository userRepository;
+    private final CacheService cacheService;
 
     @Transactional(readOnly = true)
     public OrganizationAnalyticsResponse getOrganizationSummary(String userEmail, UUID organizationId) {
@@ -38,7 +40,7 @@ public class AnalyticsService {
         organizationMemberRepository.findByOrganizationAndUser(organization, user)
             .orElseThrow(() -> new IdentityException("User is not a member of this organization"));
 
-        return summarize(organization);
+        return cachedSummary(organization);
     }
 
     @Transactional(readOnly = true)
@@ -46,7 +48,23 @@ public class AnalyticsService {
         Organization organization = organizationRepository.findById(organizationId)
             .orElseThrow(() -> new IdentityException("Organization not found"));
 
-        return summarize(organization);
+        return cachedSummary(organization);
+    }
+
+    /**
+     * Cache-aside on the summary only: the membership/ownership checks
+     * above always run against the database first, so a cached summary
+     * can never leak to a non-member. A miss runs the COUNT queries and
+     * stores the result for {@link CacheService#ANALYTICS_TTL}.
+     */
+    private OrganizationAnalyticsResponse cachedSummary(Organization organization) {
+        String key = CacheService.analyticsKey(organization.getId());
+        return cacheService.get(key, OrganizationAnalyticsResponse.class)
+            .orElseGet(() -> {
+                OrganizationAnalyticsResponse response = summarize(organization);
+                cacheService.put(key, response, CacheService.ANALYTICS_TTL);
+                return response;
+            });
     }
 
     private OrganizationAnalyticsResponse summarize(Organization organization) {

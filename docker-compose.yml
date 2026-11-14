@@ -17,6 +17,21 @@ services:
       timeout: 5s
       retries: 5
 
+  redis:
+    image: redis:7.4-alpine
+    container_name: jeep-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   backend:
     build:
       context: ./backend
@@ -25,11 +40,15 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      redis:
+        condition: service_healthy
     environment:
       SPRING_PROFILES_ACTIVE: prod
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/jeep
       SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-jeep}
       SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      SPRING_DATA_REDIS_HOST: redis
+      SPRING_DATA_REDIS_PORT: 6379
       JEEP_SECURITY_JWT_SECRET: ${JEEP_SECURITY_JWT_SECRET:?JEEP_SECURITY_JWT_SECRET is required}
       JEEP_CORS_ALLOWED_ORIGINS: ${JEEP_CORS_ALLOWED_ORIGINS:?JEEP_CORS_ALLOWED_ORIGINS is required}
     ports:
@@ -55,3 +74,4 @@ services:
 
 volumes:
   postgres_data:
+  redis_data:
