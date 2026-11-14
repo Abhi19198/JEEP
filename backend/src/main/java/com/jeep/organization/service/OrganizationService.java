@@ -54,8 +54,7 @@ public class OrganizationService {
         User user = userRepository.findByEmail(userEmail)
             .orElseThrow(() -> new IdentityException("User not found"));
 
-        return organizationMemberRepository.findAll().stream()
-            .filter(member -> member.getUser().getId().equals(user.getId()))
+        return organizationMemberRepository.findByUser(user).stream()
             .map(member -> toResponse(member.getOrganization()))
             .toList();
     }

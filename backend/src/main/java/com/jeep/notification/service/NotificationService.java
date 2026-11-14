@@ -67,6 +67,38 @@ public class NotificationService {
             .toList();
     }
 
+    /**
+     * Creates a notification for a specific user (used for automatic
+     * notifications, e.g. when a task is assigned or its status changes).
+     * Unlike {@link #createNotification}, the recipient is given directly
+     * instead of being the authenticated caller.
+     */
+    @Transactional
+    public NotificationResponse createForUser(User recipient, NotificationType type, ChannelType channel, String title, String message) {
+        Notification notification = Notification.builder()
+            .user(recipient)
+            .type(type)
+            .channel(channel)
+            .title(title)
+            .message(message)
+            .build();
+
+        return toResponse(notificationRepository.save(notification));
+    }
+
+    @Transactional
+    public NotificationResponse markAsRead(String userEmail, UUID notificationId) {
+        User user = userRepository.findByEmail(userEmail)
+            .orElseThrow(() -> new IdentityException("User not found"));
+        Notification notification = notificationRepository.findById(notificationId)
+            .orElseThrow(() -> new IdentityException("Notification not found"));
+        if (!notification.getUser().getId().equals(user.getId())) {
+            throw new IdentityException("Notification does not belong to this user");
+        }
+        notification.markAsRead();
+        return toResponse(notification);
+    }
+
     private NotificationResponse toResponse(Notification notification) {
         return new NotificationResponse(
             notification.getId(),

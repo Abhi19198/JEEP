@@ -16,6 +16,8 @@ import org.springframework.context.annotation.Import;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.ActiveProfiles;
 
+import java.util.UUID;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -93,5 +95,76 @@ class NotificationServiceTest {
         )))
             .isInstanceOf(IdentityException.class)
             .hasMessageContaining("Unsupported notification type");
+    }
+
+    @Test
+    void markAsRead_shouldMarkOwnNotificationAsRead() {
+        userRepository.save(User.builder()
+            .firstName("Mary")
+            .lastName("Anning")
+            .email("mary@jeep.example")
+            .passwordHash(passwordEncoder.encode("StrongPass123!"))
+            .status(AccountStatus.ACTIVE)
+            .role(UserRole.VIEWER)
+            .build());
+
+        NotificationResponse created = notificationService.createNotification("mary@jeep.example", new CreateNotificationRequest(
+            "TASK_UPDATE",
+            "IN_APP",
+            "Task assigned",
+            "You were assigned a task"
+        ));
+        assertThat(created.read()).isFalse();
+
+        NotificationResponse marked = notificationService.markAsRead("mary@jeep.example", created.id());
+        assertThat(marked.read()).isTrue();
+        assertThat(marked.id()).isEqualTo(created.id());
+    }
+
+    @Test
+    void markAsRead_shouldFailForUnknownNotification() {
+        userRepository.save(User.builder()
+            .firstName("Mary")
+            .lastName("Anning")
+            .email("mary@jeep.example")
+            .passwordHash(passwordEncoder.encode("StrongPass123!"))
+            .status(AccountStatus.ACTIVE)
+            .role(UserRole.VIEWER)
+            .build());
+
+        assertThatThrownBy(() -> notificationService.markAsRead("mary@jeep.example", UUID.randomUUID()))
+            .isInstanceOf(IdentityException.class)
+            .hasMessageContaining("Notification not found");
+    }
+
+    @Test
+    void markAsRead_shouldFailWhenNotificationBelongsToAnotherUser() {
+        userRepository.save(User.builder()
+            .firstName("Mary")
+            .lastName("Anning")
+            .email("mary@jeep.example")
+            .passwordHash(passwordEncoder.encode("StrongPass123!"))
+            .status(AccountStatus.ACTIVE)
+            .role(UserRole.VIEWER)
+            .build());
+        userRepository.save(User.builder()
+            .firstName("Alan")
+            .lastName("Turing")
+            .email("alan@jeep.example")
+            .passwordHash(passwordEncoder.encode("StrongPass123!"))
+            .status(AccountStatus.ACTIVE)
+            .role(UserRole.VIEWER)
+            .build());
+
+        NotificationResponse created = notificationService.createNotification("mary@jeep.example", new CreateNotificationRequest(
+            "TASK_UPDATE",
+            "IN_APP",
+            "Task assigned",
+            "You were assigned a task"
+        ));
+
+        assertThatThrownBy(() -> notificationService.markAsRead("alan@jeep.example", created.id()))
+            .isInstanceOf(IdentityException.class)
+            .hasMessageContaining("does not belong");
     }
 }

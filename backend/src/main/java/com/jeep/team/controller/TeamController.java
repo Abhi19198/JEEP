@@ -1,6 +1,7 @@
 package com.jeep.team.controller;
 
 import com.jeep.team.dto.CreateTeamRequest;
+import com.jeep.team.dto.TeamMemberResponse;
 import com.jeep.team.dto.TeamResponse;
 import com.jeep.team.service.TeamService;
 import jakarta.validation.Valid;
@@ -37,5 +38,10 @@ public class TeamController {
     @GetMapping("/organization/{organizationId}")
     public ResponseEntity<List<TeamResponse>> getTeamsForOrganization(@PathVariable UUID organizationId) {
         return ResponseEntity.ok(teamService.getTeamsForOrganization(organizationId));
+    }
+
+    @GetMapping("/{teamId}/members")
+    public ResponseEntity<List<TeamMemberResponse>> getTeamMembers(@PathVariable UUID teamId) {
+        return ResponseEntity.ok(teamService.getTeamMembers(teamId));
     }
 }

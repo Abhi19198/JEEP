@@ -120,4 +120,30 @@ class TeamServiceTest {
             .isInstanceOf(IdentityException.class)
             .hasMessageContaining("Organization not found");
     }
+
+    @Test
+    void getTeamMembers_shouldReturnCreatorAsLead() {
+        User user = saveUser("Ada", "Lovelace", "ada@jeep.example");
+        Organization organization = saveOrganizationWithMember(user);
+
+        TeamResponse team = teamService.createTeam("ada@jeep.example", new CreateTeamRequest(
+            "Platform",
+            organization.getId().toString()
+        ));
+
+        assertThat(teamService.getTeamMembers(team.id()))
+            .hasSize(1)
+            .first()
+            .satisfies(member -> {
+                assertThat(member.email()).isEqualTo("ada@jeep.example");
+                assertThat(member.role().name()).isEqualTo("LEAD");
+            });
+    }
+
+    @Test
+    void getTeamMembers_shouldFailForUnknownTeam() {
+        assertThatThrownBy(() -> teamService.getTeamMembers(UUID.randomUUID()))
+            .isInstanceOf(IdentityException.class)
+            .hasMessageContaining("Team not found");
+    }
 }

@@ -6,6 +6,10 @@ import com.jeep.task.dto.UpdateTaskRequest;
 import com.jeep.task.service.TaskService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
+import org.springframework.data.web.PageableDefault;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
@@ -16,9 +20,9 @@ import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-import java.util.List;
 import java.util.UUID;
 
 @RestController
@@ -38,8 +42,13 @@ public class TaskController {
     }
 
     @GetMapping("/project/{projectId}")
-    public ResponseEntity<List<TaskResponse>> getTasksForProject(Authentication authentication, @PathVariable UUID projectId) {
-        return ResponseEntity.ok(taskService.getTasksForProject(authentication.getName(), projectId));
+    public ResponseEntity<Page<TaskResponse>> getTasksForProject(
+        Authentication authentication,
+        @PathVariable UUID projectId,
+        @RequestParam(required = false) String search,
+        @PageableDefault(size = 10, sort = "createdAt", direction = Sort.Direction.DESC) Pageable pageable
+    ) {
+        return ResponseEntity.ok(taskService.getTasksForProject(authentication.getName(), projectId, search, pageable));
     }
 
     @GetMapping("/{id}")

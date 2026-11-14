@@ -14,10 +14,11 @@ import com.jeep.project.dto.ProjectResponse;
 import com.jeep.project.dto.UpdateProjectRequest;
 import com.jeep.project.repository.ProjectRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.util.List;
 import java.util.UUID;
 
 @Service
@@ -52,7 +53,7 @@ public class ProjectService {
     }
 
     @Transactional(readOnly = true)
-    public List<ProjectResponse> getProjectsForOrganization(String userEmail, UUID organizationId) {
+    public Page<ProjectResponse> getProjectsForOrganization(String userEmail, UUID organizationId, String search, Pageable pageable) {
         User user = userRepository.findByEmail(userEmail)
             .orElseThrow(() -> new IdentityException("User not found"));
         Organization organization = organizationRepository.findById(organizationId)
@@ -60,9 +61,10 @@ public class ProjectService {
         organizationMemberRepository.findByOrganizationAndUser(organization, user)
             .orElseThrow(() -> new IdentityException("User is not a member of this organization"));
 
-        return projectRepository.findByOrganization(organization).stream()
-            .map(this::toResponse)
-            .toList();
+        Page<Project> page = (search == null || search.isBlank())
+            ? projectRepository.findByOrganization(organization, pageable)
+            : projectRepository.searchByOrganization(organization, search.trim(), pageable);
+        return page.map(this::toResponse);
     }
 
     @Transactional(readOnly = true)

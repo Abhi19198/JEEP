@@ -14,10 +14,13 @@ import com.jeep.organization.repository.OrganizationRepository;
 import com.jeep.project.domain.Project;
 import com.jeep.project.domain.ProjectStatus;
 import com.jeep.project.repository.ProjectRepository;
+import com.jeep.notification.repository.NotificationRepository;
+import com.jeep.notification.service.NotificationService;
 import com.jeep.task.domain.TaskPriority;
 import com.jeep.task.domain.TaskStatus;
 import com.jeep.task.dto.CreateTaskRequest;
 import com.jeep.task.dto.TaskResponse;
+import com.jeep.task.dto.UpdateTaskRequest;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -30,12 +33,15 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @DataJpaTest
-@Import({TaskService.class, PasswordConfig.class})
+@Import({TaskService.class, NotificationService.class, PasswordConfig.class})
 @ActiveProfiles("test")
 class TaskServiceTest {
 
     @Autowired
     private TaskService taskService;
+
+    @Autowired
+    private NotificationRepository notificationRepository;
 
     @Autowired
     private UserRepository userRepository;
@@ -208,5 +214,106 @@ class TaskServiceTest {
         assertThatThrownBy(() -> taskService.getTask("alan@jeep.example", created.id()))
             .isInstanceOf(IdentityException.class)
             .hasMessageContaining("not a member");
+    }
+
+    private User saveUser(String firstName, String lastName, String email) {
+        return userRepository.save(User.builder()
+            .firstName(firstName)
+            .lastName(lastName)
+            .email(email)
+            .passwordHash(passwordEncoder.encode("StrongPass123!"))
+            .status(AccountStatus.ACTIVE)
+            .role(UserRole.DEVELOPER)
+            .build());
+    }
+
+    private Project saveProjectFor(User member) {
+        Organization organization = organizationRepository.save(Organization.builder()
+            .name("JEEP Labs")
+            .description("Engineering org")
+            .active(true)
+            .build());
+
+        organizationMemberRepository.save(OrganizationMember.builder()
+            .organization(organization)
+            .user(member)
+            .role(OrganizationRole.OWNER)
+            .build());
+
+        return projectRepository.save(Project.builder()
+            .organization(organization)
+            .name("Platform Upgrade")
+            .description("Migration project")
+            .status(ProjectStatus.ACTIVE)
+            .build());
+    }
+
+    @Test
+    void createTask_shouldNotifyAssigneeWhenDifferentFromCreator() {
+        User creator = saveUser("Grace", "Hopper", "grace@jeep.example");
+        User assignee = saveUser("Alan", "Turing", "alan@jeep.example");
+        Project project = saveProjectFor(creator);
+
+        taskService.createTask("grace@jeep.example", new CreateTaskRequest(
+            project.getId(),
+            "Implement SSO",
+            "Add OAuth login",
+            TaskPriority.HIGH,
+            assignee.getId(),
+            TaskStatus.TODO
+        ));
+
+        assertThat(notificationRepository.findByUserOrderByCreatedAtDesc(assignee))
+            .hasSize(1)
+            .first()
+            .satisfies(notification -> assertThat(notification.getTitle()).contains("Task assigned"));
+        assertThat(notificationRepository.findByUserOrderByCreatedAtDesc(creator)).isEmpty();
+    }
+
+    @Test
+    void createTask_shouldNotNotifyWhenAssigneeIsCreator() {
+        User creator = saveUser("Grace", "Hopper", "grace@jeep.example");
+        Project project = saveProjectFor(creator);
+
+        taskService.createTask("grace@jeep.example", new CreateTaskRequest(
+            project.getId(),
+            "Implement SSO",
+            "Add OAuth login",
+            TaskPriority.HIGH,
+            creator.getId(),
+            TaskStatus.TODO
+        ));
+
+        assertThat(notificationRepository.findByUserOrderByCreatedAtDesc(creator)).isEmpty();
+    }
+
+    @Test
+    void updateTask_shouldNotifyAssigneeOnStatusChange() {
+        User creator = saveUser("Grace", "Hopper", "grace@jeep.example");
+        User assignee = saveUser("Alan", "Turing", "alan@jeep.example");
+        Project project = saveProjectFor(creator);
+
+        TaskResponse created = taskService.createTask("grace@jeep.example", new CreateTaskRequest(
+            project.getId(),
+            "Implement SSO",
+            "Add OAuth login",
+            TaskPriority.HIGH,
+            assignee.getId(),
+            TaskStatus.TODO
+        ));
+
+        taskService.updateTask("grace@jeep.example", created.id(), new UpdateTaskRequest(
+            "Implement SSO",
+            "Add OAuth login",
+            TaskPriority.HIGH,
+            assignee.getId(),
+            TaskStatus.IN_PROGRESS
+        ));
+
+        // One notification for the assignment, one for the status change.
+        assertThat(notificationRepository.findByUserOrderByCreatedAtDesc(assignee))
+            .hasSize(2)
+            .first()
+            .satisfies(notification -> assertThat(notification.getTitle()).contains("status changed"));
     }
 }
