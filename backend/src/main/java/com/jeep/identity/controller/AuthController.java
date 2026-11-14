@@ -2,6 +2,7 @@ package com.jeep.identity.controller;
 
 import com.jeep.identity.dto.AuthResponse;
 import com.jeep.identity.dto.LoginRequest;
+import com.jeep.identity.dto.RefreshTokenRequest;
 import com.jeep.identity.dto.RegisterRequest;
 import com.jeep.identity.service.AuthService;
 import jakarta.validation.Valid;
@@ -28,5 +29,10 @@ public class AuthController {
     @PostMapping("/login")
     public ResponseEntity<AuthResponse> login(@Valid @RequestBody LoginRequest request) {
         return ResponseEntity.ok(authService.login(request));
+    }
+
+    @PostMapping("/refresh")
+    public ResponseEntity<AuthResponse> refresh(@Valid @RequestBody RefreshTokenRequest request) {
+        return ResponseEntity.ok(authService.refresh(request));
     }
 }

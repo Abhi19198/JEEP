@@ -11,4 +11,6 @@ import java.util.UUID;
 public interface OrganizationMemberRepository extends JpaRepository<OrganizationMember, UUID> {
 
     Optional<OrganizationMember> findByOrganizationAndUser(Organization organization, User user);
+
+    long countByOrganization(Organization organization);
 }

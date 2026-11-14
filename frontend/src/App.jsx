@@ -9,13 +9,18 @@ const emptyProject = { name: '', description: '' }
 const emptyTask = { title: '', description: '', priority: 'MEDIUM', status: 'TODO' }
 
 async function requestJson(path, options = {}) {
+  const { token, _retried, headers: extraHeaders, ...fetchOptions } = options
   const response = await fetch(`${API_BASE}${path}`, {
-    headers: { 'Content-Type': 'application/json', ...(options.token ? { Authorization: `Bearer ${options.token}` } : {}), ...(options.headers || {}) },
-    ...options,
+    headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(extraHeaders || {}) },
+    ...fetchOptions,
   })
   const contentType = response.headers.get('content-type') || ''
   const payload = contentType.includes('application/json') ? await response.json() : null
-  if (!response.ok) throw new Error(payload?.message || payload?.error || 'Request failed')
+  if (!response.ok) {
+    const error = new Error(payload?.message || payload?.error || 'Request failed')
+    error.status = response.status
+    throw error
+  }
   return payload
 }
 
@@ -38,23 +43,47 @@ function App() {
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
 
+  // Authenticated requests go through here: on a 401 the access token is
+  // refreshed once with the stored refresh token and the request is retried.
+  // If the refresh also fails, the session is expired and the user is logged out.
+  const apiRequest = async (path, options = {}) => {
+    try {
+      return await requestJson(path, { ...options, token: options.token || session?.token })
+    } catch (reason) {
+      if (reason.status !== 401 || !session?.refreshToken || options._retried) throw reason
+      try {
+        const refreshed = await requestJson('/auth/refresh', {
+          method: 'POST',
+          body: JSON.stringify({ refreshToken: session.refreshToken }),
+        })
+        const nextSession = { ...session, token: refreshed.accessToken, refreshToken: refreshed.refreshToken || session.refreshToken }
+        localStorage.setItem(SESSION_KEY, JSON.stringify(nextSession))
+        setSession(nextSession)
+        return await requestJson(path, { ...options, token: nextSession.token, _retried: true })
+      } catch (refreshReason) {
+        logout()
+        throw refreshReason
+      }
+    }
+  }
+
   const loadOrganizations = async (token = session?.token) => {
     if (!token) return
-    const result = await requestJson('/organizations', { token })
+    const result = await apiRequest('/organizations', { token })
     setOrganizations(result || [])
     if (!selectedOrganization && result?.[0]) setSelectedOrganization(result[0].id)
   }
 
   const loadProjects = async (organizationId = selectedOrganization) => {
     if (!organizationId || !session?.token) return
-    const result = await requestJson(`/projects/organization/${organizationId}`, { token: session.token })
+    const result = await apiRequest(`/projects/organization/${organizationId}`, { token: session.token })
     setProjects(result || [])
     setSelectedProject(result?.[0]?.id || '')
   }
 
   const loadTasks = async (projectId = selectedProject) => {
     if (!projectId || !session?.token) return
-    setTasks(await requestJson(`/tasks/project/${projectId}`, { token: session.token }))
+    setTasks(await apiRequest(`/tasks/project/${projectId}`, { token: session.token }))
   }
 
   useEffect(() => {
@@ -80,7 +109,7 @@ function App() {
       const endpoint = isLogin ? '/auth/login' : '/auth/register'
       const payload = isLogin ? { email: authForm.email, password: authForm.password } : authForm
       const response = await requestJson(endpoint, { method: 'POST', body: JSON.stringify(payload) })
-      const nextSession = { email: response.email, role: response.role, token: response.accessToken }
+      const nextSession = { email: response.email, role: response.role, token: response.accessToken, refreshToken: response.refreshToken }
       localStorage.setItem(SESSION_KEY, JSON.stringify(nextSession))
       setSession(nextSession)
       setAuthForm(emptyAuth)
@@ -95,7 +124,7 @@ function App() {
     setLoading(true)
     setError('')
     try {
-      await requestJson(path, { method: 'POST', token: session.token, body: JSON.stringify(body) })
+      await apiRequest(path, { method: 'POST', token: session.token, body: JSON.stringify(body) })
       await afterSave()
     } catch (reason) {
       setError(reason.message)
@@ -132,7 +161,7 @@ function App() {
     if (!selectedOrganization) return
     setLoading(true)
     try {
-      setAnalytics(await requestJson(`/analytics/organizations/${selectedOrganization}`, { token: session.token }))
+      setAnalytics(await apiRequest(`/analytics/organizations/${selectedOrganization}`, { token: session.token }))
     } catch (reason) {
       setError(reason.message)
     } finally {
@@ -144,7 +173,7 @@ function App() {
     event.preventDefault()
     setLoading(true)
     try {
-      setAiResponse(await requestJson('/ai/suggest', { method: 'POST', token: session.token, body: JSON.stringify({ ...aiForm, projectId: selectedProject }) }))
+      setAiResponse(await apiRequest('/ai/suggest', { method: 'POST', token: session.token, body: JSON.stringify({ ...aiForm, projectId: selectedProject }) }))
     } catch (reason) {
       setError(reason.message)
     } finally {

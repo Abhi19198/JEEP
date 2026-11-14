@@ -15,6 +15,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.List;
 import java.util.UUID;
 
 @Service
@@ -37,42 +38,7 @@ public class AnalyticsService {
         organizationMemberRepository.findByOrganizationAndUser(organization, user)
             .orElseThrow(() -> new IdentityException("User is not a member of this organization"));
 
-        long totalMembers = organizationMemberRepository.findAll().stream()
-            .filter(member -> member.getOrganization().getId().equals(organization.getId()))
-            .count();
-
-        long totalTeams = teamRepository.findAll().stream()
-            .filter(team -> team.getOrganization().getId().equals(organization.getId()))
-            .count();
-
-        long totalProjects = projectRepository.findAll().stream()
-            .filter(project -> project.getOrganization().getId().equals(organization.getId()))
-            .count();
-
-        long openTasks = taskRepository.findAll().stream()
-            .filter(task -> task.getProject().getOrganization().getId().equals(organization.getId()))
-            .filter(task -> task.getStatus() != TaskStatus.DONE && task.getStatus() != TaskStatus.CANCELLED)
-            .count();
-
-        long completedTasks = taskRepository.findAll().stream()
-            .filter(task -> task.getProject().getOrganization().getId().equals(organization.getId()))
-            .filter(task -> task.getStatus() == TaskStatus.DONE)
-            .count();
-
-        long inProgressTasks = taskRepository.findAll().stream()
-            .filter(task -> task.getProject().getOrganization().getId().equals(organization.getId()))
-            .filter(task -> task.getStatus() == TaskStatus.IN_PROGRESS || task.getStatus() == TaskStatus.REVIEW)
-            .count();
-
-        return new OrganizationAnalyticsResponse(
-            organization.getId(),
-            totalMembers,
-            totalTeams,
-            totalProjects,
-            openTasks,
-            completedTasks,
-            inProgressTasks
-        );
+        return summarize(organization);
     }
 
     @Transactional(readOnly = true)
@@ -84,28 +50,24 @@ public class AnalyticsService {
     }
 
     private OrganizationAnalyticsResponse summarize(Organization organization) {
-        long totalMembers = organizationMemberRepository.findAll().stream()
-            .filter(member -> member.getOrganization().getId().equals(organization.getId()))
-            .count();
-        long totalTeams = teamRepository.findAll().stream()
-            .filter(team -> team.getOrganization().getId().equals(organization.getId()))
-            .count();
-        long totalProjects = projectRepository.findAll().stream()
-            .filter(project -> project.getOrganization().getId().equals(organization.getId()))
-            .count();
-        long openTasks = taskRepository.findAll().stream()
-            .filter(task -> task.getProject().getOrganization().getId().equals(organization.getId()))
-            .filter(task -> task.getStatus() != TaskStatus.DONE && task.getStatus() != TaskStatus.CANCELLED)
-            .count();
-        long completedTasks = taskRepository.findAll().stream()
-            .filter(task -> task.getProject().getOrganization().getId().equals(organization.getId()))
-            .filter(task -> task.getStatus() == TaskStatus.DONE)
-            .count();
-        long inProgressTasks = taskRepository.findAll().stream()
-            .filter(task -> task.getProject().getOrganization().getId().equals(organization.getId()))
-            .filter(task -> task.getStatus() == TaskStatus.IN_PROGRESS || task.getStatus() == TaskStatus.REVIEW)
-            .count();
+        long totalMembers = organizationMemberRepository.countByOrganization(organization);
+        long totalTeams = teamRepository.countByOrganization(organization);
+        long totalProjects = projectRepository.countByOrganization(organization);
+        long openTasks = taskRepository.countByProject_OrganizationAndStatusNotIn(
+            organization, List.of(TaskStatus.DONE, TaskStatus.CANCELLED));
+        long completedTasks = taskRepository.countByProject_OrganizationAndStatus(
+            organization, TaskStatus.DONE);
+        long inProgressTasks = taskRepository.countByProject_OrganizationAndStatusIn(
+            organization, List.of(TaskStatus.IN_PROGRESS, TaskStatus.REVIEW));
 
-        return new OrganizationAnalyticsResponse(organization.getId(), totalMembers, totalTeams, totalProjects, openTasks, completedTasks, inProgressTasks);
+        return new OrganizationAnalyticsResponse(
+            organization.getId(),
+            totalMembers,
+            totalTeams,
+            totalProjects,
+            openTasks,
+            completedTasks,
+            inProgressTasks
+        );
     }
 }
