@@ -50,7 +50,7 @@ public class AuthService {
         String accessToken = tokenService.generateAccessToken(savedUser);
         String refreshToken = tokenService.generateRefreshToken(savedUser);
 
-        return new AuthResponse(accessToken, refreshToken, "Bearer", savedUser.getEmail(), savedUser.getRole().name());
+        return new AuthResponse(accessToken, refreshToken, "Bearer", savedUser.getEmail(), savedUser.getRole().name(), savedUser.getId());
     }
 
     @Transactional
@@ -71,7 +71,7 @@ public class AuthService {
         String accessToken = tokenService.generateAccessToken(user);
         String refreshToken = tokenService.generateRefreshToken(user);
 
-        return new AuthResponse(accessToken, refreshToken, "Bearer", user.getEmail(), user.getRole().name());
+        return new AuthResponse(accessToken, refreshToken, "Bearer", user.getEmail(), user.getRole().name(), user.getId());
     }
 
     @Transactional(readOnly = true)
@@ -96,6 +96,6 @@ public class AuthService {
 
         String accessToken = tokenService.generateAccessToken(user);
 
-        return new AuthResponse(accessToken, request.refreshToken(), "Bearer", user.getEmail(), user.getRole().name());
+        return new AuthResponse(accessToken, request.refreshToken(), "Bearer", user.getEmail(), user.getRole().name(), user.getId());
     }
 }

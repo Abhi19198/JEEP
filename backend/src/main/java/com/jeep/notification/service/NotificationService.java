@@ -9,7 +9,9 @@ import com.jeep.notification.domain.NotificationType;
 import com.jeep.notification.dto.CreateNotificationRequest;
 import com.jeep.notification.dto.NotificationResponse;
 import com.jeep.notification.repository.NotificationRepository;
+import com.jeep.websocket.NotificationCreatedEvent;
 import lombok.RequiredArgsConstructor;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -22,6 +24,7 @@ public class NotificationService {
 
     private final NotificationRepository notificationRepository;
     private final UserRepository userRepository;
+    private final ApplicationEventPublisher eventPublisher;
 
     @Transactional
     public NotificationResponse createNotification(String userEmail, CreateNotificationRequest request) {
@@ -54,7 +57,9 @@ public class NotificationService {
             .build();
 
         Notification saved = notificationRepository.save(notification);
-        return toResponse(saved);
+        NotificationResponse response = toResponse(saved);
+        eventPublisher.publishEvent(new NotificationCreatedEvent(response));
+        return response;
     }
 
     @Transactional(readOnly = true)
@@ -83,7 +88,9 @@ public class NotificationService {
             .message(message)
             .build();
 
-        return toResponse(notificationRepository.save(notification));
+        NotificationResponse response = toResponse(notificationRepository.save(notification));
+        eventPublisher.publishEvent(new NotificationCreatedEvent(response));
+        return response;
     }
 
     @Transactional
