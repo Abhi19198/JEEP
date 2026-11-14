@@ -9,6 +9,38 @@ const COLUMN_LABELS = { TODO: 'To Do', IN_PROGRESS: 'In Progress', REVIEW: 'Revi
 const PRIORITIES = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']
 const PAGE_SIZE = 12
 
+const matchesSearch = (task, search) => {
+  if (!search.trim()) return true
+  const query = search.trim().toLowerCase()
+  return task.title?.toLowerCase().includes(query) || (task.description || '').toLowerCase().includes(query)
+}
+
+// Merges one live task event into the currently loaded page. Events for
+// tasks on other pages are ignored — the REST load fetches those when the
+// user navigates there. Events never trigger a refetch: the payload
+// carries the full updated task.
+const applyTaskEvent = (current, event, search, page) => {
+  const task = event.task
+  if (!task?.id) return current
+  const present = current.items.some((item) => item.id === task.id)
+  if (event.type === 'TASK_DELETED') {
+    if (!present) return current
+    return { ...current, items: current.items.filter((item) => item.id !== task.id), totalElements: Math.max(0, current.totalElements - 1) }
+  }
+  if (event.type === 'TASK_UPDATED') {
+    if (!present) return current
+    if (!matchesSearch(task, search)) {
+      return { ...current, items: current.items.filter((item) => item.id !== task.id), totalElements: Math.max(0, current.totalElements - 1) }
+    }
+    return { ...current, items: current.items.map((item) => (item.id === task.id ? task : item)) }
+  }
+  if (event.type === 'TASK_CREATED') {
+    if (page !== 0 || present || !matchesSearch(task, search)) return current
+    return { ...current, items: [task, ...current.items].slice(0, PAGE_SIZE), totalElements: current.totalElements + 1 }
+  }
+  return current
+}
+
 export function TasksPage({ ws }) {
   const { api, projects, selectedProject, setSelectedProject, setLoading, setError } = ws
   const [taskForm, setTaskForm] = useState(emptyTask)
@@ -35,6 +67,16 @@ export function TasksPage({ ws }) {
       .catch((reason) => { if (!cancelled) setError(reason.message) })
     return () => { cancelled = true }
   }, [api, selectedProject, appliedSearch, page, setError])
+
+  // Live updates: merge task events for this project into the loaded page.
+  // REST above stays the source of truth on load and the fallback when
+  // the socket is down.
+  useEffect(() => {
+    if (!selectedProject) return undefined
+    return ws.live.subscribe(`/topic/project/${selectedProject}`, (event) => {
+      setPageData((current) => applyTaskEvent(current, event, appliedSearch, page))
+    })
+  }, [selectedProject, appliedSearch, page, ws.live])
 
   const updateForm = (setter) => (event) => setter((current) => ({ ...current, [event.target.name]: event.target.value }))
 
@@ -144,6 +186,7 @@ export function TasksPage({ ws }) {
   return (
     <section className="panel">
       <PanelTitle title="Tasks" />
+      <p className="live-status">{ws.liveConnected ? '● Live updates on' : '○ Live updates off — showing last loaded data'}</p>
       <select value={selectedProject} onChange={(event) => { setSelectedProject(event.target.value); setPage(0) }}>
         <option value="">Choose project</option>
         {projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}

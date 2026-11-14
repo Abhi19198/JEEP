@@ -2,8 +2,21 @@ import { useEffect, useState } from 'react'
 import { PanelTitle } from '../components/Brand.jsx'
 
 export function NotificationsPage({ ws }) {
-  const { api, setLoading, setError } = ws
+  const { api, session, setLoading, setError } = ws
   const [notifications, setNotifications] = useState([])
+
+  // Live updates: new notifications for this user are prepended as they
+  // arrive. REST below stays the source of truth on load and the
+  // fallback when the socket is down.
+  useEffect(() => {
+    if (!session?.userId) return undefined
+    return ws.live.subscribe(`/topic/user/${session.userId}/notifications`, (notification) => {
+      if (!notification?.id) return
+      setNotifications((current) => (current.some((item) => item.id === notification.id)
+        ? current
+        : [notification, ...current]))
+    })
+  }, [session?.userId, ws.live])
 
   const loadNotifications = async () => {
     setNotifications((await api('/notifications')) || [])
@@ -35,6 +48,7 @@ export function NotificationsPage({ ws }) {
   return (
     <section className="panel">
       <PanelTitle title={`Notifications${unreadCount > 0 ? ` (${unreadCount} unread)` : ''}`} />
+      <p className="live-status">{ws.liveConnected ? '● Live updates on' : '○ Live updates off — showing last loaded data'}</p>
       <div className="org-list">
         {notifications.map((notification) => (
           <div className={`org-item ${notification.read ? '' : 'unread'}`} key={notification.id}>

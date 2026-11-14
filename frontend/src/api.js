@@ -1,3 +1,18 @@
+// The JWT payload carries the user id (claim "userId"); the backend also
+// returns it in the auth response. Decoding the payload needs no secret —
+// it is only used to pick which notification topic to subscribe to, and
+// the server still authorizes every subscription.
+export function userIdFromToken(token) {
+  try {
+    const payload = token.split('.')[1]
+    let base64 = payload.replace(/-/g, '+').replace(/_/g, '/')
+    while (base64.length % 4) base64 += '='
+    return JSON.parse(atob(base64))?.userId || null
+  } catch {
+    return null
+  }
+}
+
 const API_BASE = (import.meta.env.VITE_API_BASE_URL || '/api/v1').replace(/\/$/, '')
 const SESSION_KEY = 'jeep-session'
 

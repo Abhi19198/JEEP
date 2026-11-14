@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import './App.css'
-import { SESSION_KEY, createApiClient, requestJson } from './api.js'
+import { SESSION_KEY, createApiClient, requestJson, userIdFromToken } from './api.js'
+import { createLiveHub, websocketUrl } from './stomp.js'
 import { Brand } from './components/Brand.jsx'
 import { Overview } from './components/Overview.jsx'
 import { Sidebar } from './components/Sidebar.jsx'
@@ -28,9 +29,16 @@ const TITLES = {
 }
 
 function App() {
-  const [session, setSession] = useState(() => JSON.parse(localStorage.getItem(SESSION_KEY) || 'null'))
+  // Sessions saved before the backend started returning userId get it
+  // from the JWT payload instead, so live notifications work for them too.
+  const [session, setSession] = useState(() => {
+    const stored = JSON.parse(localStorage.getItem(SESSION_KEY) || 'null')
+    if (stored?.token && !stored.userId) stored.userId = userIdFromToken(stored.token)
+    return stored
+  })
   const [isLogin, setIsLogin] = useState(true)
   const [authForm, setAuthForm] = useState(emptyAuth)
+  const [liveConnected, setLiveConnected] = useState(false)
   const [organizations, setOrganizations] = useState([])
   const [projects, setProjects] = useState([])
   const [analytics, setAnalytics] = useState(null)
@@ -44,6 +52,24 @@ function App() {
   // stable `api` function while refreshes still see the latest tokens.
   const sessionRef = useRef(session)
   sessionRef.current = session
+
+  // Live updates: one STOMP connection for the session, created once.
+  // Pages subscribe through this hub; when the socket is down they keep
+  // working from their REST loads. A refreshed token reconnects with it.
+  const [liveHub] = useState(() => createLiveHub({
+    onConnect: () => setLiveConnected(true),
+    onDisconnect: () => setLiveConnected(false),
+  }))
+
+  useEffect(() => {
+    if (!session?.token) {
+      liveHub.disconnect()
+      setLiveConnected(false)
+      return
+    }
+    liveHub.connect(websocketUrl(), session.token)
+    return () => liveHub.disconnect()
+  }, [session?.token, liveHub])
 
   const logout = useCallback(() => {
     localStorage.removeItem(SESSION_KEY)
@@ -105,7 +131,7 @@ function App() {
       const endpoint = isLogin ? '/auth/login' : '/auth/register'
       const payload = isLogin ? { email: authForm.email, password: authForm.password } : authForm
       const response = await requestJson(endpoint, { method: 'POST', body: JSON.stringify(payload) })
-      const nextSession = { email: response.email, role: response.role, token: response.accessToken, refreshToken: response.refreshToken }
+      const nextSession = { email: response.email, role: response.role, userId: response.userId || userIdFromToken(response.accessToken), token: response.accessToken, refreshToken: response.refreshToken }
       localStorage.setItem(SESSION_KEY, JSON.stringify(nextSession))
       setSession(nextSession)
       setAuthForm(emptyAuth)
@@ -149,6 +175,7 @@ function App() {
     api, session, organizations, selectedOrganization, setSelectedOrganization,
     projects, selectedProject, setSelectedProject, analytics, setAnalytics,
     loading, setLoading, error, setError,
+    live: liveHub, liveConnected,
     refreshOrganizations: loadOrganizations, refreshProjects: loadProjects, loadReport,
   }
 
